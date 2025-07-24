@@ -1,30 +1,55 @@
 import React, { useState } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
-import { Shield, Smartphone } from 'lucide-react';
+import { Shield, Smartphone, Settings, Info } from 'lucide-react';
 import PhoneInput from './PhoneInput';
 import OTPInput from './OTPInput';
 import SuccessScreen from './SuccessScreen';
-import { AuthService } from '../services/authService';
+import { OTPServiceFactory, OTPProvider } from '../services/otpServiceFactory';
 import { AuthStep, User } from '../types/auth';
 
 const MobileAuth: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<AuthStep>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState<'sms' | 'whatsapp'>('sms');
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [currentProvider, setCurrentProvider] = useState<OTPProvider>(
+    (process.env.REACT_APP_OTP_SERVICE as OTPProvider) || 'mock'
+  );
 
-  const handlePhoneSubmit = async (phone: string) => {
+  // Get OTP service instance
+  const otpService = OTPServiceFactory.createService(currentProvider);
+  const providerInfo = OTPServiceFactory.getProviderFeatures(currentProvider);
+
+  const handlePhoneSubmit = async (data: { phoneNumber: string; channel: 'sms' | 'whatsapp' }) => {
     setIsLoading(true);
     try {
-      const result = await AuthService.sendOTP(phone);
+      console.log(`🚀 Sending ${data.channel.toUpperCase()} OTP to ${data.phoneNumber}`);
+      
+      const result = data.channel === 'whatsapp' 
+        ? await otpService.sendWhatsAppOTP(data.phoneNumber)
+        : await otpService.sendSMSOTP(data.phoneNumber);
+
       if (result.success) {
-        setPhoneNumber(phone);
+        setPhoneNumber(data.phoneNumber);
+        setSelectedChannel(data.channel);
         setCurrentStep('otp');
         toast.success(result.message);
+        
+        // For demo purposes with mock service
+        if (currentProvider === 'mock') {
+          toast.success(`🔐 Demo OTP: Check browser console for the code`, {
+            duration: 8000,
+            icon: '💡'
+          });
+        }
+      } else {
+        toast.error(result.message || 'Failed to send OTP');
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to send OTP');
+    } catch (error: any) {
+      console.error('OTP Send Error:', error);
+      toast.error('Failed to send OTP. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -33,14 +58,20 @@ const MobileAuth: React.FC = () => {
   const handleOTPSubmit = async (otp: string) => {
     setIsLoading(true);
     try {
-      const result = await AuthService.verifyOTP(phoneNumber, otp);
-      if (result.success && result.user) {
+      console.log(`🔐 Verifying OTP: ${otp} for ${phoneNumber}`);
+      
+      const result = await otpService.verifyOTP(phoneNumber, otp);
+
+      if (result.success) {
         setUser(result.user);
         setCurrentStep('success');
         toast.success(result.message);
+      } else {
+        toast.error(result.message || 'Invalid OTP');
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Verification failed');
+    } catch (error: any) {
+      console.error('OTP Verify Error:', error);
+      toast.error('Verification failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -49,12 +80,26 @@ const MobileAuth: React.FC = () => {
   const handleResendOTP = async () => {
     setIsResending(true);
     try {
-      const result = await AuthService.resendOTP(phoneNumber);
+      console.log(`🔄 Resending ${selectedChannel.toUpperCase()} OTP to ${phoneNumber}`);
+      
+      const result = await otpService.resendOTP(phoneNumber, selectedChannel);
+
       if (result.success) {
-        toast.success('New OTP sent successfully');
+        toast.success(`OTP resent via ${selectedChannel.toUpperCase()}`);
+        
+        // For demo purposes with mock service
+        if (currentProvider === 'mock') {
+          toast.success(`🔐 Demo OTP: Check browser console for the new code`, {
+            duration: 8000,
+            icon: '💡'
+          });
+        }
+      } else {
+        toast.error(result.message || 'Failed to resend OTP');
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to resend OTP');
+    } catch (error: any) {
+      console.error('OTP Resend Error:', error);
+      toast.error('Failed to resend OTP. Please try again.');
     } finally {
       setIsResending(false);
     }
@@ -63,14 +108,18 @@ const MobileAuth: React.FC = () => {
   const handleBackToPhone = () => {
     setCurrentStep('phone');
     setPhoneNumber('');
+    setSelectedChannel('sms');
   };
 
   const handleContinue = () => {
-    // Reset the flow or navigate to dashboard
-    setCurrentStep('phone');
-    setPhoneNumber('');
-    setUser(null);
-    toast.success('Ready for another authentication!');
+    toast.success('Welcome! You can now access the application.');
+    // Reset for demo
+    setTimeout(() => {
+      setCurrentStep('phone');
+      setPhoneNumber('');
+      setSelectedChannel('sms');
+      setUser(null);
+    }, 2000);
   };
 
   const renderCurrentStep = () => {
@@ -86,6 +135,7 @@ const MobileAuth: React.FC = () => {
         return (
           <OTPInput
             phoneNumber={phoneNumber}
+            channel={selectedChannel}
             onSubmit={handleOTPSubmit}
             onResend={handleResendOTP}
             onBack={handleBackToPhone}
@@ -107,87 +157,184 @@ const MobileAuth: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-primary-50 flex items-center justify-center p-4">
-      <Toaster
+      <Toaster 
         position="top-center"
         toastOptions={{
           duration: 4000,
           style: {
-            background: '#ffffff',
-            color: '#374151',
-            border: '1px solid #e5e7eb',
-            borderRadius: '0.5rem',
-            fontSize: '14px',
-            maxWidth: '500px',
-          },
-          success: {
-            iconTheme: {
-              primary: '#10b981',
-              secondary: '#ffffff',
-            },
-          },
-          error: {
-            iconTheme: {
-              primary: '#ef4444',
-              secondary: '#ffffff',
-            },
+            background: '#363636',
+            color: '#fff',
           },
         }}
       />
       
-      <div className="w-full max-w-lg">
+      <div className="w-full max-w-6xl">
         {/* Header */}
-        {currentStep === 'phone' && (
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-primary-100 rounded-full mb-6">
-              <Shield className="w-10 h-10 text-primary-600" />
+        <div className="text-center mb-8">
+          <div className="flex items-center justify-center space-x-3 mb-4">
+            <div className="p-3 bg-primary-600 rounded-full">
+              <Shield className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              Secure Login
-            </h1>
-            <p className="text-lg text-gray-600 mb-2">
-              Enter your phone number to get started
-            </p>
-            <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
-              <Smartphone className="w-4 h-4" />
-              <span>SMS verification • Fast & secure</span>
+            <h1 className="text-3xl font-bold text-gray-900">Mobile Authentication</h1>
+          </div>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            Secure your account with SMS or WhatsApp verification. Choose your preferred method and get instant access.
+          </p>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Current Provider Info */}
+          <div className="lg:order-1 space-y-6">
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+              <div className="flex items-center space-x-3 mb-4">
+                <Settings className="w-6 h-6 text-primary-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Current Provider</h3>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Service:</span>
+                  <span className="font-medium text-gray-900">
+                    {OTPServiceFactory.getProviderName(currentProvider)}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">SMS Support:</span>
+                  <span className={`text-sm font-medium ${providerInfo.sms ? 'text-green-600' : 'text-red-600'}`}>
+                    {providerInfo.sms ? '✓ Available' : '✗ Not Available'}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">WhatsApp Support:</span>
+                  <span className={`text-sm font-medium ${providerInfo.whatsapp ? 'text-green-600' : 'text-red-600'}`}>
+                    {providerInfo.whatsapp ? '✓ Available' : '✗ Not Available'}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Reliability:</span>
+                  <span className="text-sm font-medium text-gray-900">{providerInfo.reliability}</span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Cost:</span>
+                  <span className="text-sm font-medium text-gray-900">{providerInfo.cost}</span>
+                </div>
+              </div>
+              
+              <p className="text-xs text-gray-500 mt-4 p-3 bg-gray-50 rounded-lg">
+                {providerInfo.description}
+              </p>
+            </div>
+
+            {/* Provider Selection */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Switch Provider</h3>
+              <div className="space-y-2">
+                {(['mock', 'twilio', 'messagecentral', 'otpless'] as OTPProvider[]).map((provider) => (
+                  <button
+                    key={provider}
+                    onClick={() => setCurrentProvider(provider)}
+                    disabled={currentStep !== 'phone'}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                      currentProvider === provider
+                        ? 'border-primary-500 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    } ${currentStep !== 'phone' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className="font-medium">{OTPServiceFactory.getProviderName(provider)}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {OTPServiceFactory.getProviderFeatures(provider).description}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        )}
 
-        {/* Authentication Form */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
-          {renderCurrentStep()}
+          {/* Main Authentication Form */}
+          <div className="lg:order-2 flex items-center justify-center">
+            <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+              {renderCurrentStep()}
+            </div>
+          </div>
+
+          {/* Features & Info */}
+          <div className="lg:order-3 space-y-6">
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+              <div className="flex items-center space-x-3 mb-4">
+                <Info className="w-6 h-6 text-primary-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Authentication Features</h3>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-start space-x-3">
+                  <div className="p-1 bg-green-100 rounded-full mt-1">
+                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">Dual Channel Support</div>
+                    <div className="text-sm text-gray-600">Choose between SMS and WhatsApp delivery</div>
+                  </div>
+                </div>
+                
+                <div className="flex items-start space-x-3">
+                  <div className="p-1 bg-green-100 rounded-full mt-1">
+                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">Real-time Verification</div>
+                    <div className="text-sm text-gray-600">Instant OTP delivery and verification</div>
+                  </div>
+                </div>
+                
+                <div className="flex items-start space-x-3">
+                  <div className="p-1 bg-green-100 rounded-full mt-1">
+                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">Multiple Providers</div>
+                    <div className="text-sm text-gray-600">Switch between Twilio, Message Central, and more</div>
+                  </div>
+                </div>
+                
+                <div className="flex items-start space-x-3">
+                  <div className="p-1 bg-green-100 rounded-full mt-1">
+                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">Global Coverage</div>
+                    <div className="text-sm text-gray-600">Works in 200+ countries worldwide</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Demo Instructions */}
+            <div className="bg-gradient-to-r from-blue-50 to-primary-50 rounded-xl p-6 border border-primary-200">
+              <div className="flex items-center space-x-3 mb-3">
+                <Smartphone className="w-6 h-6 text-primary-600" />
+                <h3 className="text-lg font-semibold text-primary-900">Demo Instructions</h3>
+              </div>
+              
+              <div className="space-y-2 text-sm text-primary-800">
+                <p><strong>Mock Service:</strong> Check browser console for OTP codes</p>
+                <p><strong>Real Services:</strong> Add your API credentials to environment variables</p>
+                <p><strong>Test Numbers:</strong> Use any valid phone number format</p>
+                <p><strong>WhatsApp:</strong> Requires provider setup for real delivery</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="text-center mt-8">
+        <div className="text-center mt-12 pt-8 border-t border-gray-200">
           <p className="text-sm text-gray-500">
-            Protected by enterprise-grade security
+            Powered by multiple OTP providers • Built with React & TypeScript
           </p>
-          <div className="flex items-center justify-center space-x-4 mt-4 text-xs text-gray-400">
-            <span>🔒 End-to-end encrypted</span>
-            <span>•</span>
-            <span>⚡ Instant verification</span>
-            <span>•</span>
-            <span>🛡️ GDPR compliant</span>
-          </div>
         </div>
-
-        {/* Demo Instructions */}
-        {currentStep === 'phone' && (
-          <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <h3 className="text-sm font-semibold text-yellow-800 mb-2">
-              📱 Demo Instructions
-            </h3>
-            <p className="text-sm text-yellow-700">
-              1. Enter any valid phone number format (e.g., +1 555 123 4567)
-              <br />
-              2. The OTP will be logged to the browser console for testing
-              <br />
-              3. Check the console (F12) to see your verification code
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
